@@ -1,0 +1,87 @@
+
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import session from 'express-session';
+import rateLimit from 'express-rate-limit';
+import dotenv from 'dotenv';
+import passport from './config/passport.js';
+import authRoutes from './routes/auth.js';
+import tripRoutes from './routes/trips.js';
+import expenseRoutes from './routes/expenses.js';
+
+dotenv.config();
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Security middleware
+app.use(helmet({
+  crossOriginOpenerPolicy: { policy: "same-origin-allow-popups" }
+}));
+
+app.use(cors({
+  origin: process.env.FRONTEND_URL || 'http://localhost:8080',
+  credentials: true
+}));
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // limit each IP to 100 requests per windowMs
+  message: { error: 'Too many requests, please try again later.' }
+});
+app.use('/api/', limiter);
+
+// Body parsing
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
+// Session configuration
+app.use(session({
+  secret: process.env.SESSION_SECRET || 'dev-secret-change-in-production',
+  resave: false,
+  saveUninitialized: false,
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    httpOnly: true,
+    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+  }
+}));
+
+// Passport initialization
+app.use(passport.initialize());
+app.use(passport.session());
+
+// Routes
+app.use('/auth', authRoutes);
+app.use('/api/trips', tripRoutes);
+app.use('/api/expenses', expenseRoutes);
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// Error handler
+app.use((err, req, res, next) => {
+  console.error('Error:', err);
+  res.status(err.status || 500).json({
+    error: process.env.NODE_ENV === 'production' 
+      ? 'Internal server error' 
+      : err.message
+  });
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
+});
+
+export default app;

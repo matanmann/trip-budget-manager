@@ -26,7 +26,7 @@ router.get('/google/callback',
   (req, res) => {
     // Successful authentication
     console.log(`✅ User logged in: ${req.user.email}`);
-    res.redirect(process.env.FRONTEND_URL || 'http://localhost:8080');
+    res.redirect(process.env.FRONTEND_URL);
   }
 );
 

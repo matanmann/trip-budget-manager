@@ -21,7 +21,7 @@ router.get('/google',
  */
 router.get('/google/callback',
   passport.authenticate('google', { 
-    failureRedirect: `${process.env.FRONTEND_URL || 'http://localhost:8080'}?error=auth_failed`
+    failureRedirect: `${process.env.FRONTEND_URL}?error=auth_failed`
   }),
   (req, res) => {
     // Successful authentication

@@ -4,7 +4,7 @@
  * Handles all communication with the backend
  */
 
-const API_BASE_URL = 'http://localhost:3000';
+const API_BASE_URL = 'https://trip-budget-manager-production.up.railway.app/';
 
 class API {
     /**

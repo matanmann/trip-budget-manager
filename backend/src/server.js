@@ -1,10 +1,10 @@
-
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import session from 'express-session';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
+import pgSession from 'connect-pg-simple';
 import passport from './config/passport.js';
 import authRoutes from './routes/auth.js';
 import tripRoutes from './routes/trips.js';
@@ -14,6 +14,8 @@ dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const PgStore = pgSession(session);
+const isProd = process.env.NODE_ENV === 'production';
 
 // Security middleware
 app.use(helmet({
@@ -27,8 +29,8 @@ app.use(cors({
 
 // Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   message: { error: 'Too many requests, please try again later.' }
 });
 app.use('/api/', limiter);
@@ -39,14 +41,18 @@ app.use(express.urlencoded({ extended: true }));
 
 // Session configuration
 app.use(session({
+  store: new PgStore({
+    conString: process.env.DATABASE_URL,
+    createTableIfMissing: true, // auto-creates the session table in Postgres
+  }),
   secret: process.env.SESSION_SECRET || 'dev-secret-change-in-production',
   resave: false,
   saveUninitialized: false,
   cookie: {
-    secure: process.env.NODE_ENV === 'production',
+    secure: isProd,       // true in production (HTTPS only)
     httpOnly: true,
     maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax'
+    sameSite: isProd ? 'none' : 'lax' // 'none' required for cross-origin (Vercel → Railway)
   }
 }));
 
@@ -73,9 +79,7 @@ app.use((req, res) => {
 app.use((err, req, res, next) => {
   console.error('Error:', err);
   res.status(err.status || 500).json({
-    error: process.env.NODE_ENV === 'production' 
-      ? 'Internal server error' 
-      : err.message
+    error: isProd ? 'Internal server error' : err.message
   });
 });
 
@@ -85,3 +89,4 @@ app.listen(PORT, () => {
 });
 
 export default app;
+

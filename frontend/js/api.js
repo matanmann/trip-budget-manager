@@ -4,7 +4,7 @@
  * Handles all communication with the backend
  */
 
-const API_BASE_URL = 'https://trip-budget-manager-production.up.railway.app';
+const API_BASE_URL = 'https://tripbudget.org';
 
 class API {
     /**

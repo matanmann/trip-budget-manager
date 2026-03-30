@@ -13,7 +13,7 @@ import expenseRoutes from './routes/expenses.js';
 dotenv.config();
 
 const app = express();
-app.set('trust proxy',1);
+app.set('trust proxy', 1); // Required for secure cookies behind Railway's proxy
 const PORT = process.env.PORT || 3000;
 const PgStore = pgSession(session);
 const isProd = process.env.NODE_ENV === 'production';
@@ -44,16 +44,18 @@ app.use(express.urlencoded({ extended: true }));
 app.use(session({
   store: new PgStore({
     conString: process.env.DATABASE_URL,
-    createTableIfMissing: true, // auto-creates the session table in Postgres
+    createTableIfMissing: true,
   }),
   secret: process.env.SESSION_SECRET || 'dev-secret-change-in-production',
   resave: false,
   saveUninitialized: false,
+  name: 'trip.sid',
   cookie: {
-    secure: isProd,       // true in production (HTTPS only)
+    secure: true,
     httpOnly: true,
-    maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
-    sameSite: isProd ? 'none' : 'lax' // 'none' required for cross-origin (Vercel → Railway)
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    sameSite: isProd ? 'none' : 'lax',
+    domain: isProd ? '.tripbudget.org' : undefined, // shared across subdomains in prod
   }
 }));
 
@@ -90,4 +92,3 @@ app.listen(PORT, () => {
 });
 
 export default app;
-

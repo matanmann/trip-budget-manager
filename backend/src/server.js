@@ -54,9 +54,10 @@ app.use(session({
     secure: true,
     httpOnly: true,
     maxAge: 7 * 24 * 60 * 60 * 1000,
-    sameSite: isProd ? 'none' : 'lax',
-    domain: isProd ? '.tripbudget.org' : undefined, // shared across subdomains in prod
-  }
+    sameSite: 'none',
+    domain: '.tripbudget.org', // leading dot covers all subdomains
+}
+
 }));
 
 // Passport initialization

@@ -4,7 +4,7 @@
  * Handles all communication with the backend
  */
 
-const API_BASE_URL = 'https://tripbudget.org';
+const API_BASE_URL = 'https://api.tripbudget.org';
 
 class API {
     /**

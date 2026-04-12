@@ -99,14 +99,23 @@ function fmt(amount, currency) {
   return amount < 0 ? `-${sym}${abs}` : `${sym}${abs}`;
 }
 
+function parseDate(d) {
+  if (!d) return null;
+  // Handle full ISO strings like 2024-03-15T00:00:00.000Z
+  const dateOnly = d.includes('T') ? d.split('T')[0] : d;
+  return new Date(dateOnly + 'T00:00:00');
+}
+
 function fmtDate(d) {
-  if (!d) return '';
-  return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+  const date = parseDate(d);
+  if (!date) return '';
+  return date.toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
 }
 
 function fmtDateShort(d) {
-  if (!d) return '';
-  return new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month:'short', day:'numeric' });
+  const date = parseDate(d);
+  if (!date) return '';
+  return date.toLocaleDateString('en-US', { month:'short', day:'numeric' });
 }
 
 function today() { return new Date().toISOString().split('T')[0]; }
@@ -174,8 +183,9 @@ function calcByCategory(exps = state.expenses) {
 function calcDailySpending(exps = state.expenses) {
   const map = {};
   exps.forEach(e => {
+    const dateKey = e.date?.includes('T') ? e.date.split('T')[0] : e.date;
     const converted = toTripCurrency(e.amount, e.currency);
-    map[e.date] = (map[e.date] || 0) + converted;
+    map[dateKey] = (map[dateKey] || 0) + converted;
   });
   return map;
 }

@@ -273,10 +273,17 @@ async function init() {
     state.activeTrip = state.trips.find(t => t.isActive) || state.trips[0] || null;
     if (state.activeTrip) state.expenses = await api.getExpenses(state.activeTrip.id);
     showApp();
+    // Handle invite token after app is shown
+    await handleInviteToken();
   } catch (err) {
     console.error('Init error:', err.message);
     if (err.message.includes('401') || err.message.includes('Not authenticated')) {
       showLogin();
+      // If there's an invite token, preserve it so after login they land on the invite
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('token')) {
+        sessionStorage.setItem('pendingInviteToken', params.get('token'));
+      }
     } else {
       showLogin();
       showToast('Error loading app: ' + err.message, 'error');
@@ -297,6 +304,12 @@ function showApp() {
   if (state.user) {
     $('user-avatar').src = state.user.picture || 'https://via.placeholder.com/32';
     $('user-name').textContent = state.user.name || state.user.email;
+  }
+  // Restore pending invite token after Google login
+  const pendingToken = sessionStorage.getItem('pendingInviteToken');
+  if (pendingToken) {
+    sessionStorage.removeItem('pendingInviteToken');
+    window.history.replaceState({}, '', `/?token=${pendingToken}`);
   }
   renderAll();
 }
@@ -332,6 +345,7 @@ function renderTripSelector() {
   }
 
   const trip = state.activeTrip;
+  const members = trip?.members || [];
   el.innerHTML = `
     <div class="trip-bar">
       <label>Active Trip</label>
@@ -341,6 +355,15 @@ function renderTripSelector() {
             ${esc(t.name)} (${t.currency} ${(t.spent||0).toFixed(0)} / ${t.totalBudget.toFixed(0)})
           </option>`).join('')}
       </select>
+      ${members.length > 1 ? `
+        <div style="display:flex;align-items:center;gap:4px" title="${members.map(m=>m.name||m.email).join(', ')}">
+          ${members.slice(0,4).map(m => `
+            <img src="${m.picture||'https://via.placeholder.com/28'}"
+                 style="width:28px;height:28px;border-radius:50%;border:2px solid white;margin-left:-6px;object-fit:cover"
+                 title="${esc(m.name||m.email||'')}"
+                 onerror="this.src='https://via.placeholder.com/28'">`).join('')}
+          ${members.length > 4 ? `<span style="font-size:0.75rem;color:var(--gray-500);margin-left:4px">+${members.length-4}</span>` : ''}
+        </div>` : ''}
       <button class="btn btn-primary btn-sm" onclick="showCreateTripModal()">➕ New Trip</button>
     </div>`;
 }
@@ -994,7 +1017,10 @@ function renderTripSettings() {
           <button type="submit" class="btn btn-primary">${trip.id ? '💾 Save Changes' : '✈️ Create Trip'}</button>
           ${trip.id ? `
             <button type="button" class="btn btn-secondary" onclick="switchTab('dashboard')">Cancel</button>
-            <button type="button" class="btn btn-danger" onclick="deleteTrip('${trip.id}')">🗑️ Delete Trip</button>` : ''}
+            ${trip.role === 'owner' ? `
+              <button type="button" class="btn btn-success" onclick="showShareModal()">🔗 Share Trip</button>
+              <button type="button" class="btn btn-danger" onclick="deleteTrip('${trip.id}')">🗑️ Delete Trip</button>
+            ` : ''}` : ''}
         </div>
       </form>
     </div>`;
@@ -1128,7 +1154,181 @@ function renderTags() {
         </span>`).join('');
 }
 
+// ==================== SHARING ====================
+
+window.showShareModal = async () => {
+  const trip = state.activeTrip;
+  if (!trip) return;
+
+  // Show loading modal first
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'share-modal';
+  overlay.innerHTML = `
+    <div class="modal fade-in" style="max-width:480px">
+      <div class="modal-header">
+        <h3>🔗 Share Trip</h3>
+        <button class="modal-close" onclick="closeShareModal()">×</button>
+      </div>
+      <div class="modal-body" id="share-modal-body">
+        <div style="text-align:center;padding:20px;color:var(--gray-400)">Generating invite link...</div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.onclick = e => { if (e.target === overlay) closeShareModal(); };
+
+  try {
+    const { inviteUrl, expiresAt } = await api.createInvitation(trip.id);
+    const members = await api.getTripMembers(trip.id);
+    const expiry = new Date(expiresAt).toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+
+    document.getElementById('share-modal-body').innerHTML = `
+      <div class="form-group">
+        <label>Invite Link <span style="font-size:0.75rem;color:var(--gray-400)">(expires ${expiry})</span></label>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="invite-url-input" value="${inviteUrl}" readonly
+                 style="flex:1;background:var(--gray-50);font-size:0.82rem">
+          <button class="btn btn-primary" onclick="copyInviteLink()">Copy</button>
+        </div>
+        <div id="copy-success" style="display:none;color:var(--success);font-size:0.8rem;margin-top:4px">✅ Copied to clipboard!</div>
+        <p style="font-size:0.8rem;color:var(--gray-400);margin-top:8px">
+          Anyone with this link can join as a collaborator after signing in with Google.
+          The link can only be used once.
+        </p>
+      </div>
+
+      <div style="margin-top:20px">
+        <div class="card-title" style="font-size:0.95rem">👥 Trip Members</div>
+        <div id="members-list">
+          ${members.map(m => `
+            <div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--gray-100)">
+              <img src="${m.user?.picture || 'https://via.placeholder.com/32'}" 
+                   style="width:36px;height:36px;border-radius:50%;object-fit:cover"
+                   onerror="this.src='https://via.placeholder.com/32'">
+              <div style="flex:1">
+                <div style="font-weight:500;font-size:0.9rem">${esc(m.user?.name || m.user?.email || 'Unknown')}</div>
+                <div style="font-size:0.78rem;color:var(--gray-400)">${m.user?.email || ''}</div>
+              </div>
+              <span style="font-size:0.75rem;padding:3px 10px;border-radius:20px;font-weight:500;
+                           background:${m.role==='owner'?'#dbeafe':'#d1fae5'};
+                           color:${m.role==='owner'?'#1e40af':'#065f46'}">
+                ${m.role === 'owner' ? '👑 Owner' : '✏️ Collaborator'}
+              </span>
+              ${m.role !== 'owner' && trip.role === 'owner'
+                ? `<button class="btn btn-danger btn-sm" onclick="removeMember('${trip.id}','${m.userId}')">Remove</button>`
+                : ''}
+            </div>`).join('')}
+        </div>
+      </div>`;
+  } catch (err) {
+    document.getElementById('share-modal-body').innerHTML = `
+      <div class="alert alert-danger">${err.message}</div>`;
+  }
+};
+
+window.copyInviteLink = () => {
+  const input = document.getElementById('invite-url-input');
+  if (!input) return;
+  navigator.clipboard.writeText(input.value).then(() => {
+    const msg = document.getElementById('copy-success');
+    if (msg) { msg.style.display = 'block'; setTimeout(() => msg.style.display = 'none', 2000); }
+  });
+};
+
+window.closeShareModal = () => {
+  document.getElementById('share-modal')?.remove();
+};
+
+window.removeMember = async (tripId, userId) => {
+  if (!confirm('Remove this member from the trip?')) return;
+  try {
+    await api.removeTripMember(tripId, userId);
+    showToast('Member removed', 'success');
+    // Refresh modal
+    closeShareModal();
+    showShareModal();
+  } catch (err) {
+    showToast('Failed to remove member: ' + err.message, 'error');
+  }
+};
+
 // ==================== START ====================
+
+// Handle invite token in URL on page load
+async function handleInviteToken() {
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('token');
+  if (!token) return false;
+
+  try {
+    const { trip, alreadyMember } = await api.previewInvitation(token);
+
+    if (alreadyMember) {
+      // Already a member — just load the trip
+      showToast(`You already have access to "${trip.name}"`, 'info');
+      window.history.replaceState({}, '', '/');
+      return true;
+    }
+
+    // Show accept modal
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.innerHTML = `
+      <div class="modal fade-in" style="max-width:420px">
+        <div class="modal-header">
+          <h3>✈️ Trip Invitation</h3>
+        </div>
+        <div class="modal-body" style="text-align:center">
+          <div style="font-size:2.5rem;margin-bottom:12px">🗺️</div>
+          <h3 style="margin-bottom:6px">${esc(trip.name)}</h3>
+          <p style="color:var(--gray-500);font-size:0.9rem;margin-bottom:20px">
+            You've been invited to collaborate on this trip as a collaborator.<br>
+            You'll be able to view and add expenses.
+          </p>
+          <div style="background:var(--gray-50);border-radius:var(--radius);padding:14px;margin-bottom:20px;text-align:left;font-size:0.875rem">
+            <div>📍 ${(trip.destinations||[]).join(', ') || 'N/A'}</div>
+            <div style="margin-top:6px">📅 ${fmtDate(trip.startDate)} – ${fmtDate(trip.endDate)}</div>
+            <div style="margin-top:6px">💰 ${trip.currency} ${parseFloat(trip.totalBudget).toLocaleString()} budget</div>
+          </div>
+          <div class="btn-group" style="justify-content:center">
+            <button class="btn btn-primary" id="accept-invite-btn" onclick="acceptInvite('${token}')">
+              ✅ Join Trip
+            </button>
+            <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove();window.history.replaceState({},'','/')">
+              Decline
+            </button>
+          </div>
+          <div id="accept-error" style="display:none;margin-top:12px" class="alert alert-danger"></div>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    window.history.replaceState({}, '', '/');
+    return true;
+  } catch (err) {
+    showToast('Invalid or expired invite link: ' + err.message, 'error');
+    window.history.replaceState({}, '', '/');
+    return false;
+  }
+}
+
+window.acceptInvite = async (token) => {
+  const btn = document.getElementById('accept-invite-btn');
+  const errEl = document.getElementById('accept-error');
+  if (btn) { btn.textContent = 'Joining...'; btn.disabled = true; }
+  try {
+    const { trip } = await api.acceptInvitation(token);
+    document.querySelector('.modal-overlay')?.remove();
+    showToast(`✅ You've joined "${trip.name}"!`, 'success');
+    // Reload trips to include the new one
+    state.trips = await api.getTrips();
+    const joined = state.trips.find(t => t.id === trip.id);
+    if (joined) { state.activeTrip = joined; state.expenses = await api.getExpenses(joined.id); }
+    renderAll();
+  } catch (err) {
+    if (btn) { btn.textContent = '✅ Join Trip'; btn.disabled = false; }
+    if (errEl) { errEl.style.display = 'block'; errEl.textContent = err.message; }
+  }
+};
 
 init();
 

@@ -1,109 +1,112 @@
-
 import express from 'express';
 import { PrismaClient } from '@prisma/client';
-import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
 const prisma = new PrismaClient();
 
-// All routes require authentication
-router.use(requireAuth);
+const requireAuth = (req, res, next) => {
+  if (!req.isAuthenticated()) return res.status(401).json({ error: 'Not authenticated' });
+  next();
+};
+
+// Helper: get member role for current user on a trip
+async function getMemberRole(tripId, userId) {
+  const member = await prisma.tripMember.findUnique({
+    where: { tripId_userId: { tripId, userId } }
+  });
+  return member?.role || null;
+}
+
+// Helper: format trip for response
+function formatTrip(trip, userId) {
+  const member = trip.members?.find(m => m.userId === userId);
+  return {
+    id: trip.id,
+    name: trip.name,
+    destinations: trip.destinations,
+    startDate: trip.startDate,
+    endDate: trip.endDate,
+    totalBudget: parseFloat(trip.totalBudget),
+    currency: trip.currency,
+    isActive: trip.isActive,
+    spent: trip.expenses?.reduce((sum, e) => sum + parseFloat(e.amount), 0) || 0,
+    categoryBudgets: trip.categoryBudgets || {},
+    travelers: trip.travelers || 1,
+    role: member?.role || 'owner',
+    members: trip.members?.map(m => ({
+      id: m.userId,
+      name: m.user?.name,
+      picture: m.user?.picture,
+      email: m.user?.email,
+      role: m.role,
+      joinedAt: m.joinedAt,
+    })) || [],
+    createdAt: trip.createdAt,
+  };
+}
 
 /**
  * GET /api/trips
- * Get all trips for the authenticated user
+ * Get all trips where user is owner OR collaborator
  */
-router.get('/', async (req, res) => {
+router.get('/', requireAuth, async (req, res) => {
   try {
-    const trips = await prisma.trip.findMany({
+    const memberships = await prisma.tripMember.findMany({
       where: { userId: req.user.id },
       include: {
-        _count: { select: { expenses: true } }
+        trip: {
+          include: {
+            expenses: { select: { amount: true } },
+            members: { include: { user: { select: { id: true, name: true, picture: true, email: true } } } }
+          }
+        }
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { trip: { createdAt: 'desc' } }
     });
 
-    // Calculate spent amount for each trip
-    const tripsWithStats = await Promise.all(
-      trips.map(async (trip) => {
-        const expenses = await prisma.expense.aggregate({
-          where: { tripId: trip.id },
-          _sum: { amount: true }
-        });
-        
-        return {
-          ...trip,
-          totalBudget: parseFloat(trip.totalBudget),
-          spent: parseFloat(expenses._sum.amount || 0),
-          expenseCount: trip._count.expenses
-        };
-      })
-    );
-
-    res.json(tripsWithStats);
-  } catch (error) {
-    console.error('Error fetching trips:', error);
-    res.status(500).json({ error: 'Failed to fetch trips' });
+    const trips = memberships.map(m => formatTrip(m.trip, req.user.id));
+    res.json(trips);
+  } catch (err) {
+    console.error('Get trips error:', err);
+    res.status(500).json({ error: 'Failed to get trips' });
   }
 });
 
 /**
  * GET /api/trips/:id
- * Get a single trip with all expenses
+ * Get a single trip (must be a member)
  */
-router.get('/:id', async (req, res) => {
+router.get('/:id', requireAuth, async (req, res) => {
   try {
-    const trip = await prisma.trip.findFirst({
-      where: {
-        id: req.params.id,
-        userId: req.user.id
-      },
+    const role = await getMemberRole(req.params.id, req.user.id);
+    if (!role) return res.status(403).json({ error: 'Access denied' });
+
+    const trip = await prisma.trip.findUnique({
+      where: { id: req.params.id },
       include: {
-        expenses: {
-          orderBy: { date: 'desc' }
-        }
+        expenses: { select: { amount: true } },
+        members: { include: { user: { select: { id: true, name: true, picture: true, email: true } } } }
       }
     });
 
-    if (!trip) {
-      return res.status(404).json({ error: 'Trip not found' });
-    }
-
-    // Calculate totals
-    const spent = trip.expenses.reduce(
-      (sum, exp) => sum + parseFloat(exp.amount), 
-      0
-    );
-
-    res.json({
-      ...trip,
-      totalBudget: parseFloat(trip.totalBudget),
-      spent,
-      expenses: trip.expenses.map(exp => ({
-        ...exp,
-        amount: parseFloat(exp.amount)
-      }))
-    });
-  } catch (error) {
-    console.error('Error fetching trip:', error);
-    res.status(500).json({ error: 'Failed to fetch trip' });
+    if (!trip) return res.status(404).json({ error: 'Trip not found' });
+    res.json(formatTrip(trip, req.user.id));
+  } catch (err) {
+    console.error('Get trip error:', err);
+    res.status(500).json({ error: 'Failed to get trip' });
   }
 });
 
 /**
  * POST /api/trips
- * Create a new trip
+ * Create a new trip (creator becomes owner)
  */
-router.post('/', async (req, res) => {
+router.post('/', requireAuth, async (req, res) => {
   try {
-    const { name, destinations, startDate, endDate, totalBudget, currency } = req.body;
+    const { name, destinations, startDate, endDate, totalBudget, currency, categoryBudgets, travelers } = req.body;
 
-    // Validation
     if (!name || !startDate || !endDate || !totalBudget || !currency) {
-      return res.status(400).json({ 
-        error: 'Missing required fields',
-        required: ['name', 'startDate', 'endDate', 'totalBudget', 'currency']
-      });
+      return res.status(400).json({ error: 'Missing required fields' });
     }
 
     const trip = await prisma.trip.create({
@@ -113,154 +116,101 @@ router.post('/', async (req, res) => {
         destinations: destinations || [],
         startDate: new Date(startDate),
         endDate: new Date(endDate),
-        totalBudget: parseFloat(totalBudget),
-        currency: currency.toUpperCase(),
-        isActive: true
+        totalBudget,
+        currency,
+        categoryBudgets: categoryBudgets || {},
+        travelers: travelers || 1,
+        members: {
+          create: { userId: req.user.id, role: 'owner' }
+        }
+      },
+      include: {
+        expenses: { select: { amount: true } },
+        members: { include: { user: { select: { id: true, name: true, picture: true, email: true } } } }
       }
     });
 
-    // Deactivate other trips
-    await prisma.trip.updateMany({
-      where: {
-        userId: req.user.id,
-        id: { not: trip.id }
-      },
-      data: { isActive: false }
-    });
-
-    console.log(`✅ Trip created: ${trip.name} by ${req.user.email}`);
-    res.status(201).json({
-      ...trip,
-      totalBudget: parseFloat(trip.totalBudget),
-      spent: 0,
-      expenseCount: 0
-    });
-  } catch (error) {
-    console.error('Error creating trip:', error);
+    res.status(201).json(formatTrip(trip, req.user.id));
+  } catch (err) {
+    console.error('Create trip error:', err);
     res.status(500).json({ error: 'Failed to create trip' });
   }
 });
 
 /**
  * PUT /api/trips/:id
- * Update an existing trip
+ * Update a trip (owner only)
  */
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireAuth, async (req, res) => {
   try {
-    const { name, destinations, startDate, endDate, totalBudget, currency, isActive } = req.body;
+    const role = await getMemberRole(req.params.id, req.user.id);
+    if (role !== 'owner') return res.status(403).json({ error: 'Only the owner can edit trip details' });
 
-    // Verify ownership
-    const existing = await prisma.trip.findFirst({
-      where: {
-        id: req.params.id,
-        userId: req.user.id
-      }
-    });
-
-    if (!existing) {
-      return res.status(404).json({ error: 'Trip not found' });
-    }
-
-    // If setting this trip as active, deactivate others
-    if (isActive) {
-      await prisma.trip.updateMany({
-        where: {
-          userId: req.user.id,
-          id: { not: req.params.id }
-        },
-        data: { isActive: false }
-      });
-    }
+    const { name, destinations, startDate, endDate, totalBudget, currency, categoryBudgets, travelers } = req.body;
 
     const trip = await prisma.trip.update({
       where: { id: req.params.id },
       data: {
-        ...(name && { name }),
-        ...(destinations && { destinations }),
-        ...(startDate && { startDate: new Date(startDate) }),
-        ...(endDate && { endDate: new Date(endDate) }),
-        ...(totalBudget && { totalBudget: parseFloat(totalBudget) }),
-        ...(currency && { currency: currency.toUpperCase() }),
-        ...(typeof isActive === 'boolean' && { isActive })
+        name, destinations,
+        startDate: new Date(startDate),
+        endDate: new Date(endDate),
+        totalBudget, currency,
+        categoryBudgets: categoryBudgets || {},
+        travelers: travelers || 1,
+      },
+      include: {
+        expenses: { select: { amount: true } },
+        members: { include: { user: { select: { id: true, name: true, picture: true, email: true } } } }
       }
     });
 
-    res.json({
-      ...trip,
-      totalBudget: parseFloat(trip.totalBudget)
-    });
-  } catch (error) {
-    console.error('Error updating trip:', error);
+    res.json(formatTrip(trip, req.user.id));
+  } catch (err) {
+    console.error('Update trip error:', err);
     res.status(500).json({ error: 'Failed to update trip' });
   }
 });
 
 /**
  * DELETE /api/trips/:id
- * Delete a trip and all its expenses
+ * Delete a trip (owner only)
  */
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAuth, async (req, res) => {
   try {
-    // Verify ownership
-    const existing = await prisma.trip.findFirst({
-      where: {
-        id: req.params.id,
-        userId: req.user.id
-      }
-    });
+    const role = await getMemberRole(req.params.id, req.user.id);
+    if (role !== 'owner') return res.status(403).json({ error: 'Only the owner can delete a trip' });
 
-    if (!existing) {
-      return res.status(404).json({ error: 'Trip not found' });
-    }
-
-    await prisma.trip.delete({
-      where: { id: req.params.id }
-    });
-
-    console.log(`🗑️ Trip deleted: ${existing.name} by ${req.user.email}`);
-    res.json({ message: 'Trip deleted successfully' });
-  } catch (error) {
-    console.error('Error deleting trip:', error);
+    await prisma.trip.delete({ where: { id: req.params.id } });
+    res.json({ message: 'Trip deleted' });
+  } catch (err) {
+    console.error('Delete trip error:', err);
     res.status(500).json({ error: 'Failed to delete trip' });
   }
 });
 
 /**
  * POST /api/trips/:id/activate
- * Set a trip as the active trip
+ * Set a trip as active for current user
  */
-router.post('/:id/activate', async (req, res) => {
+router.post('/:id/activate', requireAuth, async (req, res) => {
   try {
-    // Verify ownership
-    const existing = await prisma.trip.findFirst({
-      where: {
-        id: req.params.id,
-        userId: req.user.id
-      }
-    });
+    const role = await getMemberRole(req.params.id, req.user.id);
+    if (!role) return res.status(403).json({ error: 'Access denied' });
 
-    if (!existing) {
-      return res.status(404).json({ error: 'Trip not found' });
-    }
-
-    // Deactivate all trips
+    // Deactivate all user's trips
     await prisma.trip.updateMany({
       where: { userId: req.user.id },
       data: { isActive: false }
     });
 
-    // Activate this trip
-    const trip = await prisma.trip.update({
+    await prisma.trip.update({
       where: { id: req.params.id },
       data: { isActive: true }
     });
 
-    res.json({
-      ...trip,
-      totalBudget: parseFloat(trip.totalBudget)
-    });
-  } catch (error) {
-    console.error('Error activating trip:', error);
+    res.json({ message: 'Trip activated' });
+  } catch (err) {
+    console.error('Activate trip error:', err);
     res.status(500).json({ error: 'Failed to activate trip' });
   }
 });

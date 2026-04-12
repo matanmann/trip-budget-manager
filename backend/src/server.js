@@ -9,6 +9,7 @@ import passport from './config/passport.js';
 import authRoutes from './routes/auth.js';
 import tripRoutes from './routes/trips.js';
 import expenseRoutes from './routes/expenses.js';
+import invitationRoutes from './routes/invitations.js';
 
 dotenv.config();
 
@@ -54,10 +55,9 @@ app.use(session({
     secure: true,
     httpOnly: true,
     maxAge: 7 * 24 * 60 * 60 * 1000,
-    sameSite: 'none',
-    domain: '.tripbudget.org', // leading dot covers all subdomains
-}
-
+    sameSite: isProd ? 'none' : 'lax',
+    domain: isProd ? '.tripbudget.org' : undefined, // shared across subdomains in prod
+  }
 }));
 
 // Passport initialization
@@ -68,6 +68,7 @@ app.use(passport.session());
 app.use('/auth', authRoutes);
 app.use('/api/trips', tripRoutes);
 app.use('/api/expenses', expenseRoutes);
+app.use('/api/invitations', invitationRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

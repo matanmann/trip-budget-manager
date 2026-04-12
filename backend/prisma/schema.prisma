@@ -1,3 +1,4 @@
+
 generator client {
   provider = "prisma-client-js"
 }
@@ -16,8 +17,9 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  trips    Trip[]
-  sessions Session[]
+  trips       Trip[]
+  sessions    Session[]
+  tripMembers TripMember[]
 }
 
 model Session {
@@ -36,7 +38,7 @@ model Trip {
   id           String   @id @default(cuid())
   userId       String
   name         String
-  destinations String[] // Array of country codes
+  destinations String[]
   startDate    DateTime
   endDate      DateTime
   totalBudget  Decimal  @db.Decimal(12, 2)
@@ -45,16 +47,48 @@ model Trip {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expenses Expense[]
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expenses    Expense[]
+  members     TripMember[]
+  invitations Invitation[]
 
   @@index([userId])
   @@index([userId, isActive])
 }
 
+model TripMember {
+  id       String   @id @default(cuid())
+  tripId   String
+  userId   String
+  role     String   @default("collaborator") // "owner" | "collaborator"
+  joinedAt DateTime @default(now())
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tripId, userId])
+  @@index([tripId])
+  @@index([userId])
+}
+
+model Invitation {
+  id        String    @id @default(cuid())
+  tripId    String
+  token     String    @unique @default(cuid())
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  usedAt    DateTime?
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([tripId])
+}
+
 model Expense {
   id              String   @id @default(cuid())
   tripId          String
+  userId          String?  // who added this expense
   amount          Decimal  @db.Decimal(12, 2)
   currency        String   @db.VarChar(3)
   category        String?
@@ -63,7 +97,7 @@ model Expense {
   paymentMethod   String?
   location        String?
   isSplit         Boolean  @default(false)
-  splitCategories Json?    // {category: amount} for split expenses
+  splitCategories Json?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -72,3 +106,4 @@ model Expense {
   @@index([tripId])
   @@index([tripId, date])
 }
+

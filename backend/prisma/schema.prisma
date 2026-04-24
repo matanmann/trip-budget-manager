@@ -43,6 +43,8 @@ model Trip {
   endDate      DateTime
   totalBudget  Decimal  @db.Decimal(12, 2)
   currency     String   @db.VarChar(3)
+  categoryBudgets Json? @default("{}")
+  travelers    Int      @default(1)
   isActive     Boolean  @default(false)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

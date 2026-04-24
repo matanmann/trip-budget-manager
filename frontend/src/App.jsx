@@ -21,9 +21,12 @@ function useActiveTrip(user) {
   const [trip, setTrip] = useState(null)
   useEffect(() => {
     if (!user) return
-    fetch(`${API}/api/trips?active=true`, { credentials: 'include' })
+    fetch(`${API}/api/trips`, { credentials: 'include' })
       .then(r => r.json())
-      .then(trips => setTrip(trips?.[0] || null))
+      .then(trips => {
+        const active = trips?.find(t => t.isActive)
+        setTrip(active || trips?.[0] || null)
+      })
       .catch(console.error)
   }, [user])
   return [trip, setTrip]
@@ -33,7 +36,7 @@ function useExpenses(tripId) {
   const [expenses, setExpenses] = useState([])
   useEffect(() => {
     if (!tripId) return
-    fetch(`${API}/api/expenses?tripId=${tripId}`, { credentials: 'include' })
+    fetch(`${API}/api/expenses/trip/${tripId}`, { credentials: 'include' })
       .then(r => r.json())
       .then(setExpenses)
       .catch(console.error)
@@ -66,7 +69,7 @@ function WizardPage({ onComplete }) {
   )
 }
 
-function BudgetPage({ trip, expenses, onAddExpense }) {
+function BudgetPage({ trip, expenses, onAddExpense, onNewTrip }) {
   if (!trip) return <Navigate to="/new" />
   const budgetItems = trip.categoryBudgets?.items || []
   return (
@@ -77,6 +80,7 @@ function BudgetPage({ trip, expenses, onAddExpense }) {
           {trip.startDate ? new Date(trip.startDate).toLocaleDateString('he-IL') : ''} –
           {trip.endDate   ? new Date(trip.endDate).toLocaleDateString('he-IL')   : ''}
         </span>
+        <button className="new-trip-btn" onClick={onNewTrip}>New trip</button>
       </div>
       <BudgetTable
         tripId={trip.id}
@@ -114,7 +118,12 @@ function AppInner() {
       <Route path="/" element={trip ? <Navigate to="/budget" /> : <Navigate to="/new" />} />
       <Route path="/new" element={<WizardPage onComplete={handleWizardComplete} />} />
       <Route path="/budget" element={
-        <BudgetPage trip={trip} expenses={expenses} onAddExpense={handleAddExpense} />
+        <BudgetPage
+          trip={trip}
+          expenses={expenses}
+          onAddExpense={handleAddExpense}
+          onNewTrip={() => navigate('/new')}
+        />
       } />
       {/* /expenses and /checklist — your existing routes keep working */}
       <Route path="*" element={<Navigate to="/" />} />

@@ -66,14 +66,3 @@ body {
 }
 .page-header h1 { font-size: 1.5rem; font-weight: 600; }
 .trip-dates { font-size: 13px; color: #999; }
-.new-trip-btn {
-  margin-inline-start: auto;
-  border: none;
-  border-radius: 10px;
-  background: #1D9E75;
-  color: #fff;
-  padding: 8px 14px;
-  font-size: 13px;
-  cursor: pointer;
-}
-.new-trip-btn:hover { background: #178a63; }

@@ -53,7 +53,7 @@ app.use(session({
   saveUninitialized: false,
   name: 'trip.sid',
   cookie: {
-    secure: isProd,
+    secure: true,
     httpOnly: true,
     maxAge: 7 * 24 * 60 * 60 * 1000,
     sameSite: isProd ? 'none' : 'lax',

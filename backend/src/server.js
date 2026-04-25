@@ -10,6 +10,7 @@ import authRoutes from './routes/auth.js';
 import tripRoutes from './routes/trips.js';
 import expenseRoutes from './routes/expenses.js';
 import invitationRoutes from './routes/invitations.js';
+import checklistRoutes from './routes/checklist.js';
 
 dotenv.config();
 
@@ -69,6 +70,12 @@ app.use('/auth', authRoutes);
 app.use('/api/trips', tripRoutes);
 app.use('/api/expenses', expenseRoutes);
 app.use('/api/invitations', invitationRoutes);
+app.use('/api/checklist', checklistRoutes);
+
+app.get('/auth/me', (req, res) => {
+  if (!req.user) return res.status(401).json(null);
+  res.json(req.user);
+});
 
 // Health check
 app.get('/health', (req, res) => {

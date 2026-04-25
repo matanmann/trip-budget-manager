@@ -49,10 +49,11 @@ model Trip {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  expenses    Expense[]
-  members     TripMember[]
-  invitations Invitation[]
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expenses       Expense[]
+  members        TripMember[]
+  invitations    Invitation[]
+  checklistItems ChecklistItem[]
 
   @@index([userId])
   @@index([userId, isActive])
@@ -107,5 +108,23 @@ model Expense {
 
   @@index([tripId])
   @@index([tripId, date])
+}
+
+model ChecklistItem {
+  id        String   @id @default(cuid())
+  tripId    String
+  text      String
+  notes     String?
+  category  String
+  isDone    Boolean  @default(false)
+  isUrgent  Boolean  @default(false)
+  doneAt    DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId])
+  @@index([tripId, isDone])
 }
 

@@ -1,3 +1,15 @@
+const app = window.tripBudgetApp || {};
+const state = app.state;
+const renderAll = app.renderAll;
+const renderTabs = app.renderTabs;
+const renderTabContent = app.renderTabContent;
+const toTripCurrency = app.toTripCurrency;
+const esc = app.esc;
+const today = app.today;
+const showToast = app.showToast;
+const CURRENCY_SYMBOLS = app.CURRENCY_SYMBOLS || {};
+const api = window.api;
+
 // ==================== WIZARD CONSTANTS ====================
 
 const WIZARD_DESTINATIONS = [

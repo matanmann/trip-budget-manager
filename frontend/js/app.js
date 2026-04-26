@@ -118,6 +118,13 @@ function fmtDateShort(d) {
   return date.toLocaleDateString('en-US', { month:'short', day:'numeric' });
 }
 
+function toInputDate(d) {
+  if (!d) return '';
+  if (d instanceof Date) return d.toISOString().split('T')[0];
+  const s = String(d);
+  return s.includes('T') ? s.split('T')[0] : s;
+}
+
 function today() { return new Date().toISOString().split('T')[0]; }
 
 function daysBetween(a, b) {
@@ -977,12 +984,12 @@ function renderTripSettings() {
         <div class="form-row">
           <div class="form-group">
             <label>Start Date <span class="required">*</span></label>
-            <input type="date" id="t-start" value="${trip.startDate||''}">
+            <input type="date" id="t-start" value="${toInputDate(trip.startDate)}">
             <div class="error-msg" id="err-t-start"></div>
           </div>
           <div class="form-group">
             <label>End Date <span class="required">*</span></label>
-            <input type="date" id="t-end" value="${trip.endDate||''}">
+            <input type="date" id="t-end" value="${toInputDate(trip.endDate)}">
             <div class="error-msg" id="err-t-end"></div>
           </div>
         </div>
@@ -1244,6 +1251,19 @@ window.removeMember = async (tripId, userId) => {
   } catch (err) {
     showToast('Failed to remove member: ' + err.message, 'error');
   }
+};
+
+// Shared app context for wizard-addon.js (separate ES module scope)
+window.tripBudgetApp = {
+  state,
+  renderAll,
+  renderTabs,
+  renderTabContent,
+  toTripCurrency,
+  esc,
+  today,
+  showToast,
+  CURRENCY_SYMBOLS,
 };
 
 // ==================== START ====================

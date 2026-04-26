@@ -516,7 +516,7 @@ function renderDashboard() {
         }).join('')}
       </div>` : ''}
 
-    ${renderBudgetEstimateCard()}
+    ${typeof renderBudgetEstimateCard === 'function' ? renderBudgetEstimateCard() : ''}
 
     <div class="chart-grid">
       <div class="chart-card">
@@ -554,7 +554,7 @@ function renderDashboard() {
       </div>
     </div>
 
-    ${renderChecklistCard()}`;
+    ${typeof renderChecklistCard === 'function' ? renderChecklistCard() : ''}`;
 }
 
 // ==================== CHARTS ====================

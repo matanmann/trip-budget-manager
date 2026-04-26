@@ -121,6 +121,102 @@ function findDestinationPreset(key) {
   return WIZARD_DESTINATIONS.find(p => p.key === key) || { key, flag: '🌍', baseDaily: 70 };
 }
 
+function computeGlobalRows({ style = 'mid', travelers = 1, totalDays = 0, destinationsCount = 1 }) {
+  const mult = WIZARD_STYLES.find(s => s.id === style)?.multiplier ?? 1;
+  const safeTravelers = Math.max(1, parseInt(travelers, 10) || 1);
+  const safeDays = Math.max(1, parseInt(totalDays, 10) || 1);
+  const safeDestinations = Math.max(1, parseInt(destinationsCount, 10) || 1);
+  const ILS = 3.65;
+
+  return [
+    {
+      itemType: 'global',
+      destination: 'Global',
+      flag: '🛫',
+      label: 'Flights',
+      days: safeDays,
+      estimatedTotal: Math.round((safeTravelers * (420 * mult)) * ILS),
+      matchCategories: ['Flights'],
+    },
+    {
+      itemType: 'global',
+      destination: 'Global',
+      flag: '🛡️',
+      label: 'Insurance',
+      days: safeDays,
+      estimatedTotal: Math.round((safeTravelers * (45 * mult)) * ILS),
+      matchCategories: ['Insurance', 'Health'],
+    },
+    {
+      itemType: 'global',
+      destination: 'Global',
+      flag: '📶',
+      label: 'Connectivity',
+      days: safeDays,
+      estimatedTotal: Math.round((safeTravelers * 18 + safeDays * 1.8) * ILS),
+      matchCategories: ['Communication'],
+    },
+    {
+      itemType: 'global',
+      destination: 'Global',
+      flag: '🛂',
+      label: 'Visas & Fees',
+      days: safeDays,
+      estimatedTotal: Math.round((safeTravelers * 35 + safeDestinations * 20) * ILS),
+      matchCategories: ['Fees'],
+    },
+  ].filter(r => r.estimatedTotal > 0);
+}
+
+function deriveSubtopics(item) {
+  if (item.subtopics) return item.subtopics;
+  const total = Math.max(0, parseInt(item.estimatedTotal, 10) || 0);
+  if (total === 0) return { Lodging: 0, Food: 0, Transport: 0, Activities: 0 };
+  const lodging = Math.round(total * 0.42);
+  const food = Math.round(total * 0.28);
+  const transport = Math.round(total * 0.18);
+  const activities = Math.max(0, total - lodging - food - transport);
+  return {
+    Lodging: lodging,
+    Food: food,
+    Transport: transport,
+    Activities: activities,
+  };
+}
+
+function normalizePlanItems(rawItems, trip) {
+  const meta = trip?.categoryBudgets?.meta || {};
+  const normalized = (rawItems || []).map(item => {
+    const type = item.itemType || 'destination';
+    const preset = type === 'destination' ? findDestinationPreset(item.destination) : null;
+    return {
+      ...item,
+      itemType: type,
+      destination: item.destination || (type === 'global' ? 'Global' : 'Other'),
+      flag: item.flag || (preset?.flag || '🌍'),
+      label: item.label || (type === 'global' ? item.destination || 'Global' : item.destination || 'Other'),
+      days: Math.max(1, parseInt(item.days, 10) || 1),
+      estimatedTotal: Math.max(0, parseInt(item.estimatedTotal, 10) || 0),
+      subtopics: type === 'destination' ? deriveSubtopics(item) : undefined,
+    };
+  });
+
+  const hasGlobal = normalized.some(i => i.itemType === 'global');
+  const destinationRows = normalized.filter(i => i.itemType === 'destination');
+  if (!hasGlobal) {
+    const totalDays = destinationRows.reduce((sum, r) => sum + (r.days || 0), 0);
+    const globals = computeGlobalRows({
+      style: meta.style || 'mid',
+      travelers: trip?.travelers || 1,
+      totalDays,
+      destinationsCount: destinationRows.length,
+    });
+    normalized.push(...globals);
+  }
+
+  return normalized;
+}
+
 function hydrateWizardStateFromTrip(trip) {
   const meta = trip?.categoryBudgets?.meta || {};
   const items = trip?.categoryBudgets?.items || [];
@@ -131,7 +227,17 @@ function hydrateWizardStateFromTrip(trip) {
     ? metaDestinations
     : destinationItems.map(i => ({ key: i.destination, flag: i.flag, days: i.days }));
 
-  const destinations = destinationSource
+  const fallbackDestinationsFromTrip = (trip?.destinations || []).map(name => ({
+    key: name,
+    flag: findDestinationPreset(name).flag,
+    days: 30,
+  }));
+
+  const resolvedDestinationSource = destinationSource.length > 0
+    ? destinationSource
+    : fallbackDestinationsFromTrip;
+
+  const destinations = resolvedDestinationSource
     .map(d => {
       const preset = findDestinationPreset(d.key);
       return {
@@ -216,46 +322,14 @@ function wizardGenerateEstimate() {
     };
   });
 
-  const globalRows = [
-    {
-      itemType: 'global',
-      destination: 'Global',
-      flag: '🛫',
-      label: 'Flights',
-      days: totalDays,
-      estimatedTotal: Math.round((allTravelers * (420 * mult)) * ILS),
-      matchCategories: ['Flights'],
-    },
-    {
-      itemType: 'global',
-      destination: 'Global',
-      flag: '🛡️',
-      label: 'Insurance',
-      days: totalDays,
-      estimatedTotal: Math.round((allTravelers * (45 * mult)) * ILS),
-      matchCategories: ['Insurance', 'Health'],
-    },
-    {
-      itemType: 'global',
-      destination: 'Global',
-      flag: '📶',
-      label: 'Connectivity',
-      days: totalDays,
-      estimatedTotal: Math.round((allTravelers * 18 + totalDays * 1.8) * ILS),
-      matchCategories: ['Communication'],
-    },
-    {
-      itemType: 'global',
-      destination: 'Global',
-      flag: '🛂',
-      label: 'Visas & Fees',
-      days: totalDays,
-      estimatedTotal: Math.round((allTravelers * 35 + wizardState.destinations.length * 20) * ILS),
-      matchCategories: ['Fees'],
-    },
-  ];
+  const globalRows = computeGlobalRows({
+    style: wizardState.style,
+    travelers: allTravelers,
+    totalDays,
+    destinationsCount: wizardState.destinations.length,
+  });
 
-  return [...destinationRows, ...globalRows.filter(r => r.estimatedTotal > 0)];
+  return [...destinationRows, ...globalRows];
 }
 
 function wizardGenerateChecklist() {
@@ -687,7 +761,7 @@ window.closeModal = (id) => { document.getElementById(id)?.remove(); };
 
 function renderBudgetEstimateCard() {
   const trip = state.activeTrip;
-  const items = trip?.categoryBudgets?.items;
+  const items = normalizePlanItems(trip?.categoryBudgets?.items, trip);
   if (!items || !items.length) return '';
 
   const ILS_SYM = CURRENCY_SYMBOLS[trip.currency] || trip.currency;

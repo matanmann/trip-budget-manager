@@ -306,6 +306,7 @@ function showLogin() {
 }
 
 function showApp() {
+  window._appState = state;
   $('login-screen').classList.add('hidden');
   $('app').style.display = 'block';
   if (state.user) {
@@ -379,10 +380,12 @@ function renderTabs() {
   const el = $('tab-nav');
   if (!el) return;
   const tabs = [
-    { id:'dashboard', label:'📊 Dashboard' },
-    { id:'add-expense', label:'➕ Add Expense' },
-    { id:'expenses', label:'📋 Expenses' },
-    { id:'settings', label:'⚙️ Trip Settings' },
+    { id:'dashboard',    label:'📊 Dashboard' },
+    { id:'add-expense',  label:'➕ Add Expense' },
+    { id:'expenses',     label:'📋 Expenses' },
+    { id:'budget-plan',  label:'🗺️ Budget Plan' },
+    { id:'checklist',    label:'✅ Checklist' },
+    { id:'settings',     label:'⚙️ Trip Settings' },
   ];
   el.innerHTML = `
     <div class="nav-tabs">
@@ -395,7 +398,7 @@ function renderTabs() {
 function renderTabContent() {
   const el = $('tab-content');
   if (!el) return;
-  if (!state.activeTrip && state.currentTab !== 'settings') {
+  if (!state.activeTrip && !['settings', 'budget-plan', 'checklist'].includes(state.currentTab)) {
     el.innerHTML = `<div class="empty-state"><div class="empty-state-icon">🗺️</div><h3>No trip selected</h3><p>Create or select a trip to get started.</p></div>`;
     return;
   }
@@ -403,6 +406,8 @@ function renderTabContent() {
     case 'dashboard':   el.innerHTML = renderDashboard(); drawCharts(); break;
     case 'add-expense': el.innerHTML = renderAddExpenseForm(); break;
     case 'expenses':    el.innerHTML = renderExpensesList(); break;
+    case 'budget-plan': el.innerHTML = typeof window.renderBudgetPlanTab === 'function' ? window.renderBudgetPlanTab() : '<div class="card">Loading...</div>'; break;
+    case 'checklist':   el.innerHTML = typeof window.renderChecklistTab === 'function' ? window.renderChecklistTab() : '<div class="card">Loading...</div>'; break;
     case 'settings':    el.innerHTML = renderTripSettings(); initCountrySelector(); break;
   }
 }

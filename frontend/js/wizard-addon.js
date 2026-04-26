@@ -669,6 +669,25 @@ function renderBudgetEstimateCard() {
     </div>`;
 }
 
+window.renderBudgetEstimateCard = renderBudgetEstimateCard;
+
+window.renderBudgetPlanTab = function() {
+  const trip = window._appState?.activeTrip || null;
+  const items = trip?.categoryBudgets?.items;
+  if (!items?.length) return `
+    <div class="card">
+      <div class="empty-state">
+        <div class="empty-state-icon">🗺️</div>
+        <h3>No budget plan yet</h3>
+        <p>Run the Trip Wizard to generate automatic estimates per destination.</p>
+        <button class="btn btn-primary" onclick="startWizard(null)" style="margin-top:14px">🧙 Run Wizard</button>
+      </div>
+    </div>`;
+  return typeof window.renderBudgetEstimateCard === 'function'
+    ? window.renderBudgetEstimateCard()
+    : '<div class="card">Loading...</div>';
+};
+
 // ==================== CHECKLIST CARD ====================
 
 function renderChecklistCard() {
@@ -715,6 +734,25 @@ function renderChecklistCard() {
         </div>`).join('')}
     </div>`;
 }
+
+window.renderChecklistCard = renderChecklistCard;
+
+window.renderChecklistTab = function() {
+  const trip = window._appState?.activeTrip || null;
+  const checklist = trip?.categoryBudgets?.checklist;
+  if (!checklist?.length) return `
+    <div class="card">
+      <div class="empty-state">
+        <div class="empty-state-icon">✅</div>
+        <h3>No checklist yet</h3>
+        <p>Run the Trip Wizard to generate a personalised pre-trip checklist.</p>
+        <button class="btn btn-primary" onclick="startWizard(null)" style="margin-top:14px">🧙 Run Wizard</button>
+      </div>
+    </div>`;
+  return typeof window.renderChecklistCard === 'function'
+    ? window.renderChecklistCard()
+    : '<div class="card">Loading...</div>';
+};
 
 window.toggleChecklistItem = async (index) => {
   const trip = state.activeTrip;

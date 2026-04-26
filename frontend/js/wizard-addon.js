@@ -98,6 +98,72 @@ const wizardState = {
   applyToTripId: null, // null = new trip, string = existing trip id
 };
 
+function getWizardDefaults() {
+  return {
+    step: 0,
+    destinations: [],
+    adults: 2,
+    kidAges: [],
+    style: 'mid',
+    startDate: '',
+    durationDays: 180,
+    applyToTripId: null,
+  };
+}
+
+function toDateInputValue(value) {
+  if (!value) return '';
+  const s = String(value);
+  return s.includes('T') ? s.split('T')[0] : s;
+}
+
+function findDestinationPreset(key) {
+  return WIZARD_DESTINATIONS.find(p => p.key === key) || { key, flag: '🌍', baseDaily: 70 };
+}
+
+function hydrateWizardStateFromTrip(trip) {
+  const meta = trip?.categoryBudgets?.meta || {};
+  const items = trip?.categoryBudgets?.items || [];
+  const destinationItems = items.filter(i => (i.itemType || 'destination') === 'destination' && i.destination);
+  const metaDestinations = Array.isArray(meta.destinations) ? meta.destinations : [];
+
+  const destinationSource = metaDestinations.length > 0
+    ? metaDestinations
+    : destinationItems.map(i => ({ key: i.destination, flag: i.flag, days: i.days }));
+
+  const destinations = destinationSource
+    .map(d => {
+      const preset = findDestinationPreset(d.key);
+      return {
+        key: d.key,
+        flag: d.flag || preset.flag,
+        days: Math.max(1, parseInt(d.days, 10) || 30),
+      };
+    })
+    .filter((d, idx, arr) => arr.findIndex(x => x.key === d.key) === idx);
+
+  const kidAges = Array.isArray(meta.kidAges)
+    ? meta.kidAges.map(v => parseInt(v, 10)).filter(v => Number.isFinite(v) && v >= 0 && v <= 17)
+    : [];
+
+  const travelers = Math.max(1, parseInt(trip?.travelers, 10) || 1);
+  const adults = Math.max(1, parseInt(meta.adults, 10) || Math.max(1, travelers - kidAges.length));
+  const durationFromDestinations = destinations.reduce((sum, d) => sum + d.days, 0);
+  const durationDays = Math.max(7, parseInt(meta.durationDays, 10) || durationFromDestinations || 180);
+  const styleIds = new Set(WIZARD_STYLES.map(s => s.id));
+
+  return {
+    step: 0,
+    destinations,
+    adults,
+    kidAges,
+    style: styleIds.has(meta.style) ? meta.style : 'mid',
+    startDate: toDateInputValue(meta.startDate || trip?.startDate),
+    durationDays,
+    applyToTripId: trip?.id || null,
+  };
+}
+
 // ==================== WIZARD CALCULATIONS ====================
 
 function wizardKidFactor(ages) {
@@ -115,9 +181,12 @@ function wizardGenerateEstimate() {
   const kf     = wizardKidFactor(wizardState.kidAges);
   const adults = wizardState.adults;
   const kids   = wizardState.kidAges.length;
+  const weightedTravelers = adults + kids * kf;
+  const allTravelers = adults + kids;
+  const totalDays = wizardState.destinations.reduce((sum, d) => sum + d.days, 0);
   const ILS    = 3.65;
 
-  return wizardState.destinations.map(d => {
+  const destinationRows = wizardState.destinations.map(d => {
     const preset   = WIZARD_DESTINATIONS.find(p => p.key === d.key);
     const base     = (preset?.baseDaily ?? 70) * mult;
     const lodging  = base * 0.42;
@@ -125,19 +194,68 @@ function wizardGenerateEstimate() {
     const transport= base * 0.18;
     const activities=base * 0.12;
 
-    const daily = lodging
-      + (adults + kids * kf) * (food + transport + activities);
+    const daily = lodging + weightedTravelers * (food + transport + activities);
+    const subtopics = {
+      Lodging: Math.round(lodging * d.days * ILS),
+      Food: Math.round(weightedTravelers * food * d.days * ILS),
+      Transport: Math.round(weightedTravelers * transport * d.days * ILS),
+      Activities: Math.round(weightedTravelers * activities * d.days * ILS),
+    };
 
     return {
+      itemType: 'destination',
       destination: d.key,
       flag:        d.flag,
+      label:       `${d.flag} ${d.key}`,
       days:        d.days,
       dailyRate:   Math.round(daily * ILS),
       estimatedTotal: Math.round(daily * d.days * ILS),
+      subtopics,
       actualTotal: 0,
       isFixed:     false,
     };
   });
+
+  const globalRows = [
+    {
+      itemType: 'global',
+      destination: 'Global',
+      flag: '🛫',
+      label: 'Flights',
+      days: totalDays,
+      estimatedTotal: Math.round((allTravelers * (420 * mult)) * ILS),
+      matchCategories: ['Flights'],
+    },
+    {
+      itemType: 'global',
+      destination: 'Global',
+      flag: '🛡️',
+      label: 'Insurance',
+      days: totalDays,
+      estimatedTotal: Math.round((allTravelers * (45 * mult)) * ILS),
+      matchCategories: ['Insurance', 'Health'],
+    },
+    {
+      itemType: 'global',
+      destination: 'Global',
+      flag: '📶',
+      label: 'Connectivity',
+      days: totalDays,
+      estimatedTotal: Math.round((allTravelers * 18 + totalDays * 1.8) * ILS),
+      matchCategories: ['Communication'],
+    },
+    {
+      itemType: 'global',
+      destination: 'Global',
+      flag: '🛂',
+      label: 'Visas & Fees',
+      days: totalDays,
+      estimatedTotal: Math.round((allTravelers * 35 + wizardState.destinations.length * 20) * ILS),
+      matchCategories: ['Fees'],
+    },
+  ];
+
+  return [...destinationRows, ...globalRows.filter(r => r.estimatedTotal > 0)];
 }
 
 function wizardGenerateChecklist() {
@@ -221,16 +339,13 @@ window.quickCreateTrip = () => {
 
 // applyToTripId: null = new trip, string = apply to existing trip
 window.startWizard = (applyToTripId = null) => {
-  Object.assign(wizardState, {
-    step: 0,
-    destinations: [],
-    adults: 2,
-    kidAges: [],
-    style: 'mid',
-    startDate: '',
-    durationDays: 180,
-    applyToTripId,
-  });
+  const defaults = getWizardDefaults();
+  if (applyToTripId) {
+    const trip = state.trips.find(t => t.id === applyToTripId);
+    Object.assign(wizardState, trip ? hydrateWizardStateFromTrip(trip) : defaults, { applyToTripId });
+  } else {
+    Object.assign(wizardState, defaults, { applyToTripId });
+  }
   renderWizardModal();
 };
 
@@ -499,7 +614,14 @@ window.wizardFinish = async () => {
           ...(trip.categoryBudgets || {}),
           items: budgetItems,
           checklist,
-          meta: { style: wizardState.style, adults: wizardState.adults, kidAges: wizardState.kidAges },
+          meta: {
+            style: wizardState.style,
+            adults: wizardState.adults,
+            kidAges: wizardState.kidAges,
+            destinations: wizardState.destinations,
+            startDate: wizardState.startDate,
+            durationDays: wizardState.durationDays,
+          },
         },
       });
       Object.assign(state.activeTrip, updated);
@@ -529,7 +651,14 @@ window.wizardFinish = async () => {
         categoryBudgets: {
           items: budgetItems,
           checklist,
-          meta: { style: wizardState.style, adults: wizardState.adults, kidAges: wizardState.kidAges },
+          meta: {
+            style: wizardState.style,
+            adults: wizardState.adults,
+            kidAges: wizardState.kidAges,
+            destinations: wizardState.destinations,
+            startDate: wizardState.startDate,
+            durationDays: wizardState.durationDays,
+          },
         },
       };
 
@@ -565,8 +694,19 @@ function renderBudgetEstimateCard() {
 
   // Merge actual expenses into each destination row
   const rows = items.map(item => {
+    const itemType = item.itemType || 'destination';
     const actual = state.expenses
-      .filter(e => e.location === item.destination || e.description?.toLowerCase().includes(item.destination.toLowerCase()))
+      .filter(e => {
+        if (itemType === 'global') {
+          const allowed = item.matchCategories || [];
+          return allowed.includes(e.category);
+        }
+        const destination = (item.destination || '').toLowerCase();
+        if (!destination) return false;
+        const location = (e.location || '').toLowerCase();
+        const description = (e.description || '').toLowerCase();
+        return location === destination || description.includes(destination);
+      })
       .reduce((sum, e) => sum + toTripCurrency(e.amount, e.currency), 0);
 
     const isFixed   = actual > 0;
@@ -607,7 +747,7 @@ function renderBudgetEstimateCard() {
         <table>
           <thead>
             <tr>
-              <th>Destination</th>
+              <th>Bucket</th>
               <th>Days</th>
               <th>Estimate</th>
               <th>Actual</th>
@@ -619,7 +759,16 @@ function renderBudgetEstimateCard() {
           <tbody>
             ${rows.map(r => `
               <tr style="${r.isOver ? 'background:#fff5f5' : ''}">
-                <td><span style="margin-right:6px">${r.flag || ''}</span>${r.destination}</td>
+                <td>
+                  <div><span style="margin-right:6px">${r.flag || ''}</span>${esc(r.label || r.destination)}</div>
+                  ${(r.itemType || 'destination') === 'destination' && r.subtopics
+                    ? `<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap">
+                        ${Object.entries(r.subtopics)
+                          .map(([name, value]) => `<span class="badge badge-gray" style="font-size:10px">${name}: ${ILS_SYM}${value.toLocaleString()}</span>`)
+                          .join('')}
+                      </div>`
+                    : ''}
+                </td>
                 <td style="color:var(--gray-500)">${r.days}</td>
                 <td style="color:var(--gray-500)">${ILS_SYM}${r.estimatedTotal.toLocaleString()}</td>
                 <td>
@@ -680,7 +829,7 @@ window.renderBudgetPlanTab = function() {
         <div class="empty-state-icon">🗺️</div>
         <h3>No budget plan yet</h3>
         <p>Run the Trip Wizard to generate automatic estimates per destination.</p>
-        <button class="btn btn-primary" onclick="startWizard(null)" style="margin-top:14px">🧙 Run Wizard</button>
+        <button class="btn btn-primary" onclick="startWizard('${trip?.id || ''}')" style="margin-top:14px">🧙 Run Wizard</button>
       </div>
     </div>`;
   return typeof window.renderBudgetEstimateCard === 'function'
@@ -746,7 +895,7 @@ window.renderChecklistTab = function() {
         <div class="empty-state-icon">✅</div>
         <h3>No checklist yet</h3>
         <p>Run the Trip Wizard to generate a personalised pre-trip checklist.</p>
-        <button class="btn btn-primary" onclick="startWizard(null)" style="margin-top:14px">🧙 Run Wizard</button>
+        <button class="btn btn-primary" onclick="startWizard('${trip?.id || ''}')" style="margin-top:14px">🧙 Run Wizard</button>
       </div>
     </div>`;
   return typeof window.renderChecklistCard === 'function'

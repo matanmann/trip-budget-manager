@@ -516,6 +516,8 @@ function renderDashboard() {
         }).join('')}
       </div>` : ''}
 
+    ${renderBudgetEstimateCard()}
+
     <div class="chart-grid">
       <div class="chart-card">
         <div class="chart-title">💰 Top 5 Largest Expenses</div>
@@ -550,7 +552,9 @@ function renderDashboard() {
                 </div>
               </div>`;}).join('')}
       </div>
-    </div>`;
+    </div>
+
+    ${renderChecklistCard()}`;
 }
 
 // ==================== CHARTS ====================
@@ -1017,6 +1021,7 @@ function renderTripSettings() {
           <button type="submit" class="btn btn-primary">${trip.id ? '💾 Save Changes' : '✈️ Create Trip'}</button>
           ${trip.id ? `
             <button type="button" class="btn btn-secondary" onclick="switchTab('dashboard')">Cancel</button>
+            <button type="button" class="btn btn-primary" onclick="startWizard('${trip.id}')">🧙 Run Wizard</button>
             ${trip.role === 'owner' ? `
               <button type="button" class="btn btn-success" onclick="showShareModal()">🔗 Share Trip</button>
               <button type="button" class="btn btn-danger" onclick="deleteTrip('${trip.id}')">🗑️ Delete Trip</button>
@@ -1089,17 +1094,6 @@ window.deleteTrip = async (tripId) => {
 };
 
 // ==================== CREATE TRIP MODAL ====================
-
-window.showCreateTripModal = () => {
-  const prev = state.activeTrip;
-  state.activeTrip = null;
-  state.currentTab = 'settings';
-  renderTabs();
-  renderTabContent();
-  // restore activeTrip reference for cancel
-  const cancelBtn = document.querySelector('#trip-form .btn-secondary');
-  if (cancelBtn) cancelBtn.onclick = () => { state.activeTrip = prev; state.currentTab = 'dashboard'; renderAll(); };
-};
 
 // ==================== COUNTRY SELECTOR ====================
 

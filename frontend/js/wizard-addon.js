@@ -977,15 +977,39 @@ window.renderChecklistTab = function() {
     : '<div class="card">Loading...</div>';
 };
 
+function buildTripUpdatePayload(trip) {
+  return {
+    name: trip.name,
+    destinations: trip.destinations || [],
+    startDate: toDateInputValue(trip.startDate),
+    endDate: toDateInputValue(trip.endDate),
+    totalBudget: parseFloat(trip.totalBudget),
+    currency: trip.currency,
+    travelers: parseInt(trip.travelers, 10) || 1,
+    categoryBudgets: trip.categoryBudgets || {},
+  };
+}
+
 window.toggleChecklistItem = async (index) => {
   const trip = state.activeTrip;
-  if (!trip?.categoryBudgets?.checklist) return;
-  trip.categoryBudgets.checklist[index].done = !trip.categoryBudgets.checklist[index].done;
+  if (!trip?.categoryBudgets?.checklist?.[index]) return;
+
+  const previous = !!trip.categoryBudgets.checklist[index].done;
+  trip.categoryBudgets.checklist[index].done = !previous;
+  renderTabContent();
 
   // Persist to backend
   try {
-    await api.updateTrip(trip.id, { categoryBudgets: trip.categoryBudgets });
-  } catch (e) { /* non-critical */ }
+    const updatedTrip = await api.updateTrip(trip.id, buildTripUpdatePayload(trip));
+    if (updatedTrip) {
+      state.activeTrip = { ...state.activeTrip, ...updatedTrip };
+      const tripIndex = state.trips.findIndex(t => t.id === updatedTrip.id);
+      if (tripIndex !== -1) state.trips[tripIndex] = { ...state.trips[tripIndex], ...updatedTrip };
+    }
+  } catch (e) {
+    trip.categoryBudgets.checklist[index].done = previous;
+    showToast('Failed to save checklist item. Please try again.', 'error');
+  }
 
   renderTabContent(); // re-render to update progress
 };
